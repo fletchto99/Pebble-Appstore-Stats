@@ -33,7 +33,7 @@ function getAllPBWs(url, callback, pbws) {
                     skipped++;
                 }
             });
-            console.log('Now analyzing offest ' + offset++);
+            console.log('Now analyzing offset ' + offset++);
             if (body.links.nextPage) {
                 getAllPBWs(body.links.nextPage, callback, pbws);
             } else {
