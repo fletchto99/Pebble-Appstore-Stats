@@ -6,7 +6,7 @@ var unzip = require('unzip');
 var mainURL = 'https://api2.getpebble.com/v2/apps/collection/all/watchapps-and-companions?limit=100';
 var hardware = 'basalt';
 var filterhardware = true;
-var MAX_QUEUE = 30;
+var MAX_QUEUE = 20;
 
 
 //Vars
@@ -45,41 +45,35 @@ function getAllPBWs(url, callback, pbws) {
 
 var queue = 0;
 
-function printResults(pbws, index) {
-    if (!index) {
-        index = 0;
-    }
-    if (index < pbws.length) {
-        if (pbws[index]) {
-            var addToQueue = function() {
-                queue++;
-                var fetch = function (retry) {
-                    var err = false;
+function printResults(pbw) {
+    var addToQueue = function () {
+        queue++;
+        var fetch = function (retry) {
 
-                    var fail = function () {
+            if (retry < 5) {
+                var err = false;
+                request({
+                    url: pbw,
+                    timeout: 2500
+                }).on('error', function () {
+                    if (!err) {
+                        fetch(retry + 1);
                         err = true;
-                        if (!retry) {
-                            retry = 0;
-                        }
-                        if (retry < 5) {
-                            fetch(retry + 1);
-                        } else {
-                            error++;
-                            analyzed++;
-                            queue--;
-                        }
-                    };
-
-                    request(pbws[index]).on('error', function () {
-                        fail();
-                    }).pipe(unzip.Parse().on('error', function () {
-                        fail();
-                    })).on('entry', function (entry) {
+                    }
+                }).pipe(unzip.Parse().on('error', function () {
+                    if (!err) {
+                        fetch(retry + 1);
+                        err = true;
+                    }
+                })).on('entry', function (entry) {
+                    if (!err) {
                         var fileName = entry.path;
-                        if (!err && fileName === "pebble-js-app.js") {
+                        if (fileName === "pebble-js-app.js") {
                             someJS++;
                             var result = '';
-                            entry.on('readable', function () {
+                            entry.on('error', function () {
+                                console.log('entry error?');
+                            }).on('readable', function () {
                                 var chunk;
                                 while ((chunk = entry.read()) != null) {
                                     result += chunk;
@@ -88,53 +82,60 @@ function printResults(pbws, index) {
                                 if (result.indexOf('simply-pebble.js') > 0) {
                                     pebbleJS++;
                                 }
-                                entry.autodrain(); //free up the entry's memory
                             });
                         } else {
                             entry.autodrain();
                         }
-                    }).on('finish', function () {
-                        if (!err) {
-                            analyzed++;
-                            queue--;
-                        }
-                    });
-                };
-                fetch();
-            };
-        } else {
-            error++;
-            analyzed++;
-        }
+                    } else {
+                        entry.autodrain();
+                    }
 
-        var checkQueue = function() {
-            if (queue < MAX_QUEUE) {
-                addToQueue();
+                }).on('finish', function () {
+                    if (!err) {
+                        analyzed++;
+                        queue--;
+                    }
+                });
             } else {
-                setTimeout(checkQueue, 500);
+                error++;
+                analyzed++;
+                queue--;
             }
         };
+        fetch(0);
+    };
 
-        checkQueue();
-        printResults(pbws, index + 1);
-    } else {
-        var done = function () {
-            setTimeout(function () {
-                if (analyzed >= pbws.length) {
-                    displayResults();
-                    process.exit(0);
-                } else {
-                    console.log(analyzed + ' analyzed out of ' + pbws.length);
-                    done();
-                }
-            }, 5000);
-        };
-        done();
-    }
+    var checkQueue = function () {
+        if (queue < MAX_QUEUE) {
+            addToQueue();
+        } else {
+            setTimeout(checkQueue, 500);
+        }
+    };
+
+    checkQueue();
 }
 
 getAllPBWs(mainURL + (filterhardware ? ('&filter_hardware=true&hardware=' + hardware) : ''), function (pbws) {
-    printResults(pbws);
+
+    pbws = cleanArray(pbws);
+
+    pbws.forEach(function (pbw) {
+        printResults(pbw);
+    });
+
+    var done = function () {
+        setTimeout(function () {
+            if (analyzed >= pbws.length) {
+                displayResults();
+                process.exit(0);
+            } else {
+                console.log(analyzed + ' analyzed out of ' + pbws.length);
+                done();
+            }
+        }, 5000);
+    };
+    done();
 });
 
 function displayResults() {
@@ -150,3 +151,13 @@ process.on('SIGINT', function () {
     displayResults();
     process.exit();
 });
+
+function cleanArray(actual) {
+    var newArray = [];
+    for (var i = 0; i < actual.length; i++) {
+        if (actual[i]) {
+            newArray.push(actual[i]);
+        }
+    }
+    return newArray;
+}
